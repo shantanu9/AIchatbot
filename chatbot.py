@@ -1,24 +1,21 @@
 import os
 from dotenv import load_dotenv
 import streamlit as st
-
-# Try to import the OpenAI client; if unavailable we gracefully fall back
-try:
-    from openai import OpenAI
-except Exception:
-    OpenAI = None
+import google.generativeai as genai
 
 # Load environment variables from .env file
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-client = None
-if OPENAI_API_KEY and OpenAI is not None:
+# Initialize Gemini model if API key is available
+gemini_model = None
+if GEMINI_API_KEY:
     try:
-        client = OpenAI(api_key=OPENAI_API_KEY)
-    except Exception:
-        client = None
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_model = genai.GenerativeModel('gemini-pro')
+    except Exception as e:
+        st.error(f"Failed to configure Gemini: {e}")
 
 st.set_page_config(page_title="Chatbot with Streamlit", page_icon="🤖")
 st.title("Your personal AI Chatbot")
@@ -43,23 +40,26 @@ for msg in st.session_state.messages:
 
 
 def generate_ai_response(user_text: str) -> str:
-    """Generate a response either via OpenAI (if configured) or a local fallback."""
-    if client is None:
-        # simple fallback: echo + guidance
-        return f"I heard: {user_text} (set OPENAI_API_KEY in .env to enable AI responses)"
-
+    """Generate a response using the Gemini API."""
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                *st.session_state.messages,
-                {"role": "user", "content": user_text},
-            ],
-        )
-        # Extract assistant content (coerce to str to avoid None typing)
-        ai_message = response.choices[0].message.content or ""
-        return str(ai_message)
+        if not gemini_model:
+            # If no AI model is available, provide guidance
+            return (
+                f"I heard: {user_text}. "
+                "(Set GEMINI_API_KEY in .env to enable AI responses)"
+            )
+
+        # For Gemini, we need to adapt the history format from previous messages
+        gemini_history = [
+            {"role": "user" if msg["role"] == "user" else "model", "parts": [msg["content"]]}
+            for msg in st.session_state.messages
+        ]
+        # Start a chat with the existing history
+        chat = gemini_model.start_chat(history=gemini_history)
+        # Send the new user message
+        response = chat.send_message(user_text)
+        return response.text or ""
+
     except Exception as e:
         return f"(Error generating response: {e})"
 
@@ -82,12 +82,6 @@ if (user_input and user_input.strip()) or send:
 
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
-        # show the user's message immediately
-        try:
-            st.chat_message("user").markdown(user_input)
-        except Exception:
-            st.markdown(f"**You:** {user_input}")
-
         # generate and display assistant response
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
@@ -98,6 +92,3 @@ if (user_input and user_input.strip()) or send:
         # clear the text_input widget (if present)
         if "text_input" in st.session_state:
             st.session_state["text_input"] = ""
-
-
-
