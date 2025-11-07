@@ -92,3 +92,4 @@ if (user_input and user_input.strip()) or send:
         # clear the text_input widget (if present)
         if "text_input" in st.session_state:
             st.session_state["text_input"] = ""
+
